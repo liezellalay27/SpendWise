@@ -11,17 +11,11 @@ import java.time.temporal.ChronoUnit
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 
-enum class BudgetPeriod(val label: String, val days: Long) {
-    DAILY("Daily", 1),
-    WEEKLY("Weekly", 7),
-    MONTHLY("Monthly", 30)
-}
-
 data class BudgetCycle(
-    val period: BudgetPeriod = BudgetPeriod.MONTHLY,
     val budget: Long = 30_000_00,
     val lowBalanceThreshold: Long = 5_000_00,
-    val startDate: LocalDate = LocalDate.now()
+    val startDate: LocalDate = LocalDate.now(),
+    val endDate: LocalDate = LocalDate.now().plusDays(30)
 )
 
 data class ActivityItem(val label: String, val amount: Long)
@@ -29,8 +23,19 @@ data class ActivityItem(val label: String, val amount: Long)
 class SpendWiseViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("spendwise", Context.MODE_PRIVATE)
 
+    val hasConfiguredBudget: Boolean
+        get() = preferences.contains("start_date") &&
+            preferences.contains("end_date") &&
+            preferences.contains("budget")
+
     var cycle by mutableStateOf(
-        BudgetCycle(budget = preferences.getLong("budget", 30_000_00))
+        BudgetCycle(
+            budget = preferences.getLong("budget", 30_000_00),
+            startDate = preferences.getString("start_date", null)
+                ?.let(LocalDate::parse) ?: LocalDate.now(),
+            endDate = preferences.getString("end_date", null)
+                ?.let(LocalDate::parse) ?: LocalDate.now().plusDays(30)
+        )
     )
         private set
     var spent by mutableStateOf(preferences.getLong("spent", 0))
@@ -45,15 +50,13 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         private set
     var recentActivity by mutableStateOf(listOf<ActivityItem>())
         private set
-    var selectedPeriod by mutableStateOf(cycle.period)
-        private set
     var isSyncing by mutableStateOf(false)
         private set
     var syncMessage by mutableStateOf<String?>(null)
         private set
 
     val daysRemaining: Long
-        get() = maxOf(1, cycle.period.days - ChronoUnit.DAYS.between(cycle.startDate, LocalDate.now()))
+        get() = maxOf(1, ChronoUnit.DAYS.between(LocalDate.now(), cycle.endDate) + 1)
 
     val remainingBalance: Long
         get() = cycle.budget + incomeAdded - spent - emergencyFund
@@ -82,9 +85,9 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         persist()
     }
 
-    fun setPeriod(period: BudgetPeriod) {
-        selectedPeriod = period
-        cycle = cycle.copy(period = period, startDate = LocalDate.now())
+    fun updateBudget(startDate: LocalDate, endDate: LocalDate, budget: Long) {
+        if (budget <= 0 || !endDate.isAfter(startDate)) return
+        cycle = cycle.copy(startDate = startDate, endDate = endDate, budget = budget)
         persist()
     }
 
@@ -114,7 +117,9 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
             .putLong("income", incomeAdded)
             .putLong("emergency", emergencyFund)
             .putInt("emergency_percent", emergencyAllocationPercent)
-            .putString("period", selectedPeriod.name)
+            .putLong("budget", cycle.budget)
+            .putString("start_date", cycle.startDate.toString())
+            .putString("end_date", cycle.endDate.toString())
             .apply()
     }
 }
