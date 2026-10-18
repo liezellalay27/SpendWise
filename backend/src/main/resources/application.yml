@@ -1,0 +1,10 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: spendwise-backend
+
+logging:
+  level:
+    com.spendwise: INFO
