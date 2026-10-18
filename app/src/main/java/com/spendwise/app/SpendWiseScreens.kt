@@ -15,11 +15,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.math.BigDecimal
 import java.text.NumberFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
 
 private val Green = Color(0xFF315C4A)
@@ -40,13 +46,24 @@ private val Warning = Color(0xFFFFF1D6)
 @Composable
 fun DashboardScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
     var dialog by remember { mutableStateOf<MoneyDialogType?>(null) }
+    var showBudgetSetup by remember { mutableStateOf(!model.hasConfiguredBudget) }
     ScreenColumn(modifier) {
         Header("Good morning, Alex", "Here is your spending plan for today.")
         AllowanceCard(model)
-        PeriodSelector(model)
+        BudgetPeriodCard(model, onEdit = { showBudgetSetup = true })
         Row(Modifier.fillMaxWidth()) {
             Button(onClick = { dialog = MoneyDialogType.EXPENSE }, modifier = Modifier.weight(1f)) {
                 Text("Add expense")
+            }
+            if (showBudgetSetup) {
+                BudgetSetupDialog(
+                    cycle = model.cycle,
+                    onSave = { startDate, endDate, budget ->
+                        model.updateBudget(startDate, endDate, budget)
+                        showBudgetSetup = false
+                    },
+                    onDismiss = { showBudgetSetup = false }
+                )
             }
             Spacer(Modifier.width(12.dp))
             OutlinedButton(onClick = { dialog = MoneyDialogType.INCOME }, modifier = Modifier.weight(1f)) {
@@ -197,17 +214,18 @@ private fun AllowanceCard(model: SpendWiseViewModel) {
 }
 
 @Composable
-private fun PeriodSelector(model: SpendWiseViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Budget cycle", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BudgetPeriod.values().forEach { period ->
-                FilterChip(
-                    selected = model.selectedPeriod == period,
-                    onClick = { model.setPeriod(period) },
-                    label = { Text(period.label) }
-                )
+private fun BudgetPeriodCard(model: SpendWiseViewModel, onEdit: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Current budget", fontWeight = FontWeight.Bold)
+                TextButton(onClick = onEdit) { Text("Edit") }
             }
+            Text(
+                "${formatDate(model.cycle.startDate)} - ${formatDate(model.cycle.endDate)}",
+                color = Green
+            )
+            Text("${model.daysRemaining} days remaining", color = Color.Gray)
         }
     }
 }
@@ -337,6 +355,88 @@ private fun MoneyDialog(
         dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+@Composable
+private fun BudgetSetupDialog(
+    cycle: BudgetCycle,
+    onSave: (LocalDate, LocalDate, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var budgetText by remember { mutableStateOf((cycle.budget / 100.0).toString()) }
+    var startDate by remember { mutableStateOf(cycle.startDate) }
+    var endDate by remember { mutableStateOf(cycle.endDate) }
+    var pickingStart by remember { mutableStateOf(false) }
+    var pickingEnd by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set your budget") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = budgetText,
+                    onValueChange = { budgetText = it },
+                    label = { Text("Budget amount in PHP") },
+                    singleLine = true
+                )
+                OutlinedButton(onClick = { pickingStart = true }, Modifier.fillMaxWidth()) {
+                    Text("Start date: ${formatDate(startDate)}")
+                }
+                OutlinedButton(onClick = { pickingEnd = true }, Modifier.fillMaxWidth()) {
+                    Text("End date: ${formatDate(endDate)}")
+                }
+                if (!endDate.isAfter(startDate)) {
+                    Text("End date must be after the start date.", color = Color(0xFFB3261E))
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                budgetText.toCentsOrNull()?.let { budget ->
+                    if (endDate.isAfter(startDate)) onSave(startDate, endDate, budget)
+                }
+            }) { Text("Save budget") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+
+    if (pickingStart) {
+        CalendarPicker(startDate, { selected -> startDate = selected; pickingStart = false }, { pickingStart = false })
+    }
+    if (pickingEnd) {
+        CalendarPicker(endDate, { selected -> endDate = selected; pickingEnd = false }, { pickingEnd = false })
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun CalendarPicker(
+    date: LocalDate,
+    onDateSelected: (LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { millis ->
+                    onDateSelected(
+                        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                    )
+                }
+            }) { Text("Select") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    ) {
+        DatePicker(state)
+    }
+}
+
+private fun formatDate(date: LocalDate): String =
+    date.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy"))
 
 private fun formatMoney(cents: Long): String =
     NumberFormat.getCurrencyInstance(Locale("en", "PH")).format(cents / 100.0)
