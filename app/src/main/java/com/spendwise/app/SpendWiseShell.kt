@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 private data class AppTab(val label: String, val marker: String)
 
 @Composable
-fun SpendWiseShell(model: SpendWiseViewModel) {
+fun SpendWiseShell(model: SpendWiseViewModel, onSignOut: () -> Unit) {
     val tabs = listOf(
         AppTab("Home", "⌂"),
         AppTab("Activity", "↕"),
@@ -42,7 +42,7 @@ fun SpendWiseShell(model: SpendWiseViewModel) {
             0 -> DashboardScreen(model, Modifier.padding(padding))
             1 -> ActivityScreen(model, Modifier.padding(padding))
             2 -> SavingsScreen(model, Modifier.padding(padding))
-            else -> ProfileScreen(model, Modifier.padding(padding))
+            else -> ProfileScreen(model, Modifier.padding(padding), onSignOut)
         }
     }
 }
