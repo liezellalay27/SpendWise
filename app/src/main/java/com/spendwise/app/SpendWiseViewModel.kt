@@ -19,6 +19,7 @@ data class BudgetCycle(
 )
 
 data class ActivityItem(val label: String, val amount: Long)
+data class ExtraBudget(val name: String, val amount: Long)
 
 class SpendWiseViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("spendwise", Context.MODE_PRIVATE)
@@ -50,6 +51,8 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         private set
     var recentActivity by mutableStateOf(listOf<ActivityItem>())
         private set
+    var extraBudgets by mutableStateOf(loadExtraBudgets())
+        private set
     var isSyncing by mutableStateOf(false)
         private set
     var syncMessage by mutableStateOf<String?>(null)
@@ -59,7 +62,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         get() = maxOf(1, ChronoUnit.DAYS.between(LocalDate.now(), cycle.endDate) + 1)
 
     val remainingBalance: Long
-        get() = cycle.budget + incomeAdded - spent - emergencyFund
+        get() = cycle.budget + extraBudgets.sumOf { it.amount } + incomeAdded - spent - emergencyFund
 
     val safeToSpendToday: Long
         get() = maxOf(0, remainingBalance / daysRemaining)
@@ -77,6 +80,16 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         incomeAdded += amount - emergencyAllocation
         emergencyFund += emergencyAllocation
         recentActivity = (listOf(ActivityItem("Income", amount)) + recentActivity).take(5)
+        persist()
+    }
+
+    fun addExtraBudget(name: String, amount: Long) {
+        if (amount <= 0) return
+        val budgetName = name.trim().ifBlank { "Additional budget" }
+        extraBudgets = extraBudgets + ExtraBudget(budgetName, amount)
+        recentActivity = (
+            listOf(ActivityItem("Budget: $budgetName", amount)) + recentActivity
+            ).take(5)
         persist()
     }
 
@@ -120,6 +133,19 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
             .putLong("budget", cycle.budget)
             .putString("start_date", cycle.startDate.toString())
             .putString("end_date", cycle.endDate.toString())
+            .putString(
+                "extra_budgets",
+                extraBudgets.joinToString("|") { "${it.name.replace("|", "")}::${it.amount}" }
+            )
             .apply()
     }
+
+    private fun loadExtraBudgets(): List<ExtraBudget> =
+        preferences.getString("extra_budgets", "")
+            ?.split("|")
+            ?.mapNotNull { entry ->
+                val parts = entry.split("::", limit = 2)
+                if (parts.size == 2) parts[1].toLongOrNull()?.let { ExtraBudget(parts[0], it) } else null
+            }
+            ?: emptyList()
 }
