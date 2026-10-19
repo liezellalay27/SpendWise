@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,6 +20,26 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    val localProperties = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+    val supabaseUrl = localProperties.getProperty("SUPABASE_URL")
+        ?: project.findProperty("SUPABASE_URL") as String? ?: ""
+    val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY")
+        ?: project.findProperty("SUPABASE_ANON_KEY") as String? ?: ""
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        }
+        getByName("release") {
+            buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        }
     }
 
     compileOptions {

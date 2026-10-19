@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
@@ -17,9 +18,16 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SpendWiseApp(model: SpendWiseViewModel = viewModel()) {
+private fun SpendWiseApp(
+    model: SpendWiseViewModel = viewModel(),
+    authModel: AuthViewModel = viewModel()
+) {
     Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        SpendWiseShell(model)
+        if (authModel.isAuthenticated) {
+            SpendWiseShell(model, onSignOut = authModel::signOut)
+        } else {
+            AuthScreen(authModel)
+        }
     }
 }
 

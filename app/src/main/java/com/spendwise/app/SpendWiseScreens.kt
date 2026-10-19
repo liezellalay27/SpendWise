@@ -445,3 +445,5 @@ private fun String.toCentsOrNull(): Long? =
     trim().toBigDecimalOrNull()?.movePointRight(2)?.let {
         try { it.longValueExact() } catch (_: ArithmeticException) { null }
     }
+    var showExtraBudgetDialog by remember { mutableStateOf(false) }
+    var showExtraBudgetDialog by remember { mutableStateOf(false) }
