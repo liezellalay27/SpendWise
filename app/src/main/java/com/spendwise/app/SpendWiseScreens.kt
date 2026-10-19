@@ -47,6 +47,7 @@ private val Warning = Color(0xFFFFF1D6)
 fun DashboardScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
     var dialog by remember { mutableStateOf<MoneyDialogType?>(null) }
     var showBudgetSetup by remember { mutableStateOf(!model.hasConfiguredBudget) }
+    var showExtraBudgetDialog by remember { mutableStateOf(false) }
     ScreenColumn(modifier) {
         Header("Good morning, Alex", "Here is your spending plan for today.")
         AllowanceCard(model)
@@ -55,20 +56,16 @@ fun DashboardScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
             Button(onClick = { dialog = MoneyDialogType.EXPENSE }, modifier = Modifier.weight(1f)) {
                 Text("Add expense")
             }
-            if (showBudgetSetup) {
-                BudgetSetupDialog(
-                    cycle = model.cycle,
-                    onSave = { startDate, endDate, budget ->
-                        model.updateBudget(startDate, endDate, budget)
-                        showBudgetSetup = false
-                    },
-                    onDismiss = { showBudgetSetup = false }
-                )
-            }
             Spacer(Modifier.width(12.dp))
             OutlinedButton(onClick = { dialog = MoneyDialogType.INCOME }, modifier = Modifier.weight(1f)) {
                 Text("Add income")
             }
+        }
+        OutlinedButton(
+            onClick = { showExtraBudgetDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Add extra budget")
         }
         if (model.remainingBalance < model.cycle.lowBalanceThreshold) {
             Card(colors = CardDefaults.cardColors(containerColor = Warning), modifier = Modifier.fillMaxWidth()) {
@@ -83,12 +80,46 @@ fun DashboardScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
         MetricGrid(
             listOf(
                 "Budget" to formatMoney(model.cycle.budget),
+                "Extra budgets" to formatMoney(model.extraBudgets.sumOf { it.amount }),
                 "Spent" to formatMoney(model.spent),
                 "Income added" to formatMoney(model.incomeAdded),
                 "Emergency fund" to formatMoney(model.emergencyFund)
             )
         )
+        if (model.extraBudgets.isNotEmpty()) {
+            SectionTitle("Extra budgets")
+            model.extraBudgets.forEach { extraBudget ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(extraBudget.name, fontWeight = FontWeight.SemiBold)
+                        Text(formatMoney(extraBudget.amount), color = Green, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
         SyncButton(model)
+    }
+    if (showBudgetSetup) {
+        BudgetSetupDialog(
+            cycle = model.cycle,
+            onSave = { startDate, endDate, budget ->
+                model.updateBudget(startDate, endDate, budget)
+                showBudgetSetup = false
+            },
+            onDismiss = { showBudgetSetup = false }
+        )
+    }
+    if (showExtraBudgetDialog) {
+        ExtraBudgetDialog(
+            onSave = { name, amount ->
+                model.addExtraBudget(name, amount)
+                showExtraBudgetDialog = false
+            },
+            onDismiss = { showExtraBudgetDialog = false }
+        )
     }
     dialog?.let {
         MoneyDialog(
@@ -182,7 +213,11 @@ fun SavingsScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ProfileScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
+fun ProfileScreen(
+    model: SpendWiseViewModel,
+    modifier: Modifier = Modifier,
+    onSignOut: () -> Unit = {}
+) {
     ScreenColumn(modifier) {
         Header("Profile", "Personalize your SpendWise experience.")
         Card(Modifier.fillMaxWidth()) {
@@ -195,6 +230,9 @@ fun ProfileScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
         PreferenceRow("Currency", "PHP")
         PreferenceRow("Notifications", "Enabled")
         PreferenceRow("Storage", "Local + backend sync")
+        OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
+            Text("Sign out")
+        }
         Text("SpendWise MVP", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
     }
 }
@@ -408,6 +446,48 @@ private fun BudgetSetupDialog(
     }
 }
 
+@Composable
+private fun ExtraBudgetDialog(
+    onSave: (String, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add extra budget") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Add money for a trip, event, or another planned goal. " +
+                        "This increases your available budget for the current cycle.",
+                    color = Color.Gray
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Budget name") },
+                    placeholder = { Text("e.g. Baguio trip") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Amount in PHP") },
+                    placeholder = { Text("e.g. 5000.00") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                amountText.toCentsOrNull()?.let { onSave(name, it) }
+            }) { Text("Add budget") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun CalendarPicker(
@@ -445,5 +525,3 @@ private fun String.toCentsOrNull(): Long? =
     trim().toBigDecimalOrNull()?.movePointRight(2)?.let {
         try { it.longValueExact() } catch (_: ArithmeticException) { null }
     }
-    var showExtraBudgetDialog by remember { mutableStateOf(false) }
-    var showExtraBudgetDialog by remember { mutableStateOf(false) }
