@@ -20,7 +20,8 @@ data class AuthResponse(
 
 data class AuthUser(
     val id: String? = null,
-    val email: String? = null
+    val email: String? = null,
+    val user_metadata: Map<String, String>? = null
 )
 
 data class AuthErrorResponse(val msg: String? = null, val error_description: String? = null)
@@ -29,6 +30,7 @@ interface SupabaseAuthService {
     @POST("auth/v1/signup")
     suspend fun signUp(
         @Query("apikey") apiKey: String,
+        @Query("redirect_to") redirectTo: String,
         @Body request: AuthRequest
     ): AuthResponse
 
@@ -55,9 +57,19 @@ object SupabaseAuthApi {
             .create(SupabaseAuthService::class.java)
     }
 
-    suspend fun signUp(email: String, password: String): AuthResponse =
-        service.signUp(BuildConfig.SUPABASE_ANON_KEY, AuthRequest(email, password))
+    suspend fun signUp(name: String, email: String, password: String): AuthResponse =
+        service.signUp(
+            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+            redirectTo = AUTH_CALLBACK_URI,
+            request = AuthRequest(
+                email = email,
+                password = password,
+                data = mapOf("display_name" to name)
+            )
+        )
 
     suspend fun signIn(email: String, password: String): AuthResponse =
         service.signIn(apiKey = BuildConfig.SUPABASE_ANON_KEY, request = AuthRequest(email, password))
+
+    const val AUTH_CALLBACK_URI = "spendwise://auth/callback"
 }

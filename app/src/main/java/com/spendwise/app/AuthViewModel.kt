@@ -2,12 +2,14 @@ package com.spendwise.app
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.io.IOException
 import javax.net.ssl.SSLHandshakeException
 
@@ -24,11 +26,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     fun signIn(email: String, password: String) {
-        authenticate(email, password, isSignUp = false)
+        authenticate(email = email, password = password, isSignUp = false)
     }
 
-    fun signUp(email: String, password: String) {
-        authenticate(email, password, isSignUp = true)
+    fun signUp(name: String, email: String, password: String) {
+        authenticate(name.trim(), email, password, isSignUp = true)
     }
 
     fun signOut() {
@@ -40,7 +42,34 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         errorMessage = null
     }
 
-    private fun authenticate(email: String, password: String, isSignUp: Boolean) {
+    fun handleAuthCallback(uri: Uri) {
+        val fragment = uri.fragment.orEmpty()
+        val values = fragment.split("&")
+            .mapNotNull { part ->
+                val separator = part.indexOf("=")
+                if (separator <= 0) null
+                else part.substring(0, separator) to Uri.decode(part.substring(separator + 1))
+            }
+            .toMap()
+        val accessToken = values["access_token"]
+        if (accessToken.isNullOrBlank()) {
+            errorMessage = "Email confirmation did not return a valid session. Try logging in again."
+            return
+        }
+        preferences.edit()
+            .putString("access_token", accessToken)
+            .putString("refresh_token", values["refresh_token"])
+            .apply()
+        isAuthenticated = true
+        requiresEmailConfirmation = false
+        errorMessage = null
+    }
+
+    private fun authenticate(name: String = "", email: String, password: String, isSignUp: Boolean) {
+        if (isSignUp && name.isBlank()) {
+            errorMessage = "Enter your name."
+            return
+        }
         if (email.isBlank() || !email.contains("@")) {
             errorMessage = "Enter a valid email address."
             return
@@ -54,7 +83,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             errorMessage = null
             requiresEmailConfirmation = false
             runCatching {
-                if (isSignUp) SupabaseAuthApi.signUp(email.trim(), password)
+                if (isSignUp) SupabaseAuthApi.signUp(name, email.trim(), password)
                 else SupabaseAuthApi.signIn(email.trim(), password)
             }.onSuccess { response ->
                 if (!response.access_token.isNullOrBlank()) {
@@ -62,6 +91,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         .putString("access_token", response.access_token)
                         .putString("refresh_token", response.refresh_token)
                         .putString("email", response.user?.email ?: email.trim())
+                        .putString("display_name", response.user?.user_metadata?.get("display_name") ?: name)
                         .apply()
                     isAuthenticated = true
                 } else if (isSignUp) {
@@ -87,6 +117,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             current = current.cause
         }
         return when (this) {
+            is HttpException -> when (code()) {
+                400 -> "Supabase rejected the request. The email may not be confirmed yet, or the link/session may have expired."
+                422 -> "Supabase rejected the email or password. Check the values and try again."
+                else -> "Supabase returned HTTP ${code()}. Try again."
+            }
             is IOException -> "Could not reach Supabase. Check the emulator internet connection."
             else -> message ?: "Unable to contact Supabase."
         }

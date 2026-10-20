@@ -54,6 +54,14 @@ SUPABASE_ANON_KEY=your-publishable-key
 
 The publishable/anon key is intended for client applications. Never put a Supabase service-role key in the Android project. Enable email authentication in Supabase under **Authentication > Providers > Email**.
 
+For email confirmation to return to the Android app, add this exact value in Supabase under **Authentication > URL Configuration > Redirect URLs**:
+
+```text
+spendwise://auth/callback
+```
+
+The app sends this redirect when creating an account. If an older confirmation email points to an unreachable URL, create the account again or request a new confirmation email after adding the redirect URL. The old link cannot be changed by the app.
+
 ### Emulator certificate troubleshooting
 
 If login shows `Chain validation failed`, do not disable HTTPS certificate validation. In the Android emulator:
@@ -65,3 +73,20 @@ If login shows `Chain validation failed`, do not disable HTTPS certificate valid
 5. Run the app again.
 
 This usually means the emulator clock or its trusted certificate store is stale. The Supabase endpoint was verified from the development machine over HTTPS.
+
+## Supabase database tables
+
+Run [001_initial_schema.sql](./supabase/migrations/001_initial_schema.sql) in the Supabase **SQL Editor**. It creates:
+
+- `profiles`
+- `budget_cycles`
+- `expenses`
+- `income_transactions`
+- `extra_budgets`
+- `emergency_fund_transactions`
+- `alerts`
+- `cycle_reports`
+
+The migration also creates a profile automatically when a Supabase Auth user signs up and enables Row Level Security so users can access only their own records.
+
+The app asks for the user's name during sign-up and sends it as `display_name` metadata. Login continues to use email and password.

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AuthScreen(model: AuthViewModel) {
     var isSignUp by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -42,6 +43,16 @@ fun AuthScreen(model: AuthViewModel) {
             color = Color.Gray
         )
         Spacer(Modifier.height(28.dp))
+        if (isSignUp) {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Your name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -71,7 +82,7 @@ fun AuthScreen(model: AuthViewModel) {
         }
         Button(
             onClick = {
-                if (isSignUp) model.signUp(email, password) else model.signIn(email, password)
+                if (isSignUp) model.signUp(name, email, password) else model.signIn(email, password)
             },
             enabled = !model.isLoading,
             modifier = Modifier.fillMaxWidth()
