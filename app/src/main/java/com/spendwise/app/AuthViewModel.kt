@@ -24,10 +24,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var requiresEmailConfirmation by mutableStateOf(false)
         private set
+    var displayName by mutableStateOf(preferences.getString("display_name", null).orEmpty())
+        private set
+    var email by mutableStateOf(preferences.getString("email", null).orEmpty())
+        private set
 
     fun signIn(email: String, password: String) {
         authenticate(email = email, password = password, isSignUp = false)
     }
+
+    private fun String.jwtSubject(): String? =
+        runCatching {
+            val payload = split(".")[1]
+            val json = String(android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP))
+            Regex("\"sub\"\\s*:\\s*\"([^\"]+)\"").find(json)?.groupValues?.get(1)
+        }.getOrNull()
 
     fun signUp(name: String, email: String, password: String) {
         authenticate(name.trim(), email, password, isSignUp = true)
@@ -36,6 +47,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun signOut() {
         preferences.edit().clear().apply()
         isAuthenticated = false
+        displayName = ""
+        email = ""
     }
 
     fun clearError() {
@@ -59,6 +72,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         preferences.edit()
             .putString("access_token", accessToken)
             .putString("refresh_token", values["refresh_token"])
+            .putString("user_id", accessToken.jwtSubject())
             .apply()
         isAuthenticated = true
         requiresEmailConfirmation = false
@@ -90,9 +104,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     preferences.edit()
                         .putString("access_token", response.access_token)
                         .putString("refresh_token", response.refresh_token)
+                        .putString("user_id", response.user?.id)
                         .putString("email", response.user?.email ?: email.trim())
                         .putString("display_name", response.user?.user_metadata?.get("display_name") ?: name)
                         .apply()
+                    displayName = response.user?.user_metadata?.get("display_name")
+                        ?.takeIf { it.isNotBlank() } ?: name
+                    this@AuthViewModel.email = response.user?.email ?: email.trim()
                     isAuthenticated = true
                 } else if (isSignUp) {
                     requiresEmailConfirmation = true
