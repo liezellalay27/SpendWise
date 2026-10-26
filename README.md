@@ -90,3 +90,23 @@ Run [001_initial_schema.sql](./supabase/migrations/001_initial_schema.sql) in th
 The migration also creates a profile automatically when a Supabase Auth user signs up and enables Row Level Security so users can access only their own records.
 
 The app asks for the user's name during sign-up and sends it as `display_name` metadata. Login continues to use email and password.
+
+### Financial data synchronization
+
+After authentication, the Android app uses the Supabase REST API with the user's
+access token. Row Level Security applies to every request. The following local
+actions are persisted to the matching Supabase tables:
+
+- Budget setup and edits -> `budget_cycles`
+- Expenses -> `expenses`
+- Added income -> `income_transactions`
+- Extra budgets -> `extra_budgets`
+- Automatic and manual savings -> `emergency_fund_transactions`
+
+The app keeps `SharedPreferences` as an offline cache and synchronizes it when the
+authenticated shell opens or when **Sync with backend** is pressed. The old
+`backend/` Spring Boot project is still an in-memory API prototype and is not the
+source of truth for Supabase data.
+
+Manual savings are available from the **Savings** tab. They reduce the available
+budget balance and create a `CONTRIBUTION` transaction in the emergency fund.

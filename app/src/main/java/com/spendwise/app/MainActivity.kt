@@ -41,7 +41,12 @@ private fun SpendWiseApp(
 ) {
     Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (authModel.isAuthenticated) {
-            SpendWiseShell(model, onSignOut = authModel::signOut)
+            SpendWiseShell(
+                model = model,
+                displayName = authModel.displayName,
+                email = authModel.email,
+                onSignOut = authModel::signOut
+            )
         } else {
             AuthScreen(authModel)
         }

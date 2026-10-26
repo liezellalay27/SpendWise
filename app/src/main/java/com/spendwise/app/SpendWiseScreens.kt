@@ -44,12 +44,16 @@ private val MutedGreen = Color(0xFFE5F0E9)
 private val Warning = Color(0xFFFFF1D6)
 
 @Composable
-fun DashboardScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
+fun DashboardScreen(
+    model: SpendWiseViewModel,
+    displayName: String = "",
+    modifier: Modifier = Modifier
+) {
     var dialog by remember { mutableStateOf<MoneyDialogType?>(null) }
     var showBudgetSetup by remember { mutableStateOf(!model.hasConfiguredBudget) }
     var showExtraBudgetDialog by remember { mutableStateOf(false) }
     ScreenColumn(modifier) {
-        Header("Good morning, Alex", "Here is your spending plan for today.")
+        Header("Good morning, ${displayName.ifBlank { "there" }}", "Here is your spending plan for today.")
         AllowanceCard(model)
         BudgetPeriodCard(model, onEdit = { showBudgetSetup = true })
         Row(Modifier.fillMaxWidth()) {
@@ -171,6 +175,7 @@ fun SavingsScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
     var allocationText by remember(model.emergencyAllocationPercent) {
         mutableStateOf(model.emergencyAllocationPercent.toString())
     }
+    var showSavingsDialog by remember { mutableStateOf(false) }
     ScreenColumn(modifier) {
         Header("Emergency fund", "Build a cushion for the unexpected.")
         Card(colors = CardDefaults.cardColors(containerColor = MutedGreen), modifier = Modifier.fillMaxWidth()) {
@@ -200,6 +205,17 @@ fun SavingsScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
         ) {
             Text("Save allocation")
         }
+        Button(
+            onClick = { showSavingsDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Add savings from budget")
+        }
+        Text(
+            "Savings are deducted from your available budget and added to the emergency fund.",
+            color = Color.Gray,
+            style = MaterialTheme.typography.bodySmall
+        )
         SectionTitle("Savings milestones")
         MetricGrid(
             listOf(
@@ -210,30 +226,73 @@ fun SavingsScreen(model: SpendWiseViewModel, modifier: Modifier = Modifier) {
         )
         EmptyState("Automatic saving is on", "Add income from the Home tab to grow your emergency fund.")
     }
+    if (showSavingsDialog) {
+        MoneyDialog(
+            title = "Add savings",
+            onConfirm = { _, amount ->
+                model.addSavings(amount)
+                showSavingsDialog = false
+            },
+            onDismiss = { showSavingsDialog = false }
+        )
+    }
 }
 
 @Composable
 fun ProfileScreen(
     model: SpendWiseViewModel,
+    displayName: String = "",
+    email: String = "",
     modifier: Modifier = Modifier,
     onSignOut: () -> Unit = {}
 ) {
+    var showResetDialog by remember { mutableStateOf(false) }
     ScreenColumn(modifier) {
         Header("Profile", "Personalize your SpendWise experience.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Alex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("alex@example.com", color = Color.Gray)
+                Text(displayName.ifBlank { "SpendWise user" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(email.ifBlank { "Email unavailable" }, color = Color.Gray)
             }
         }
         SectionTitle("Preferences")
         PreferenceRow("Currency", "PHP")
         PreferenceRow("Notifications", "Enabled")
         PreferenceRow("Storage", "Local + backend sync")
+        OutlinedButton(
+            onClick = { showResetDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Reset current cycle data")
+        }
         OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
             Text("Sign out")
         }
         Text("SpendWise MVP", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+    }
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset current cycle?") },
+            text = {
+                Text("This clears expenses, added income, emergency-fund allocations, and extra budgets stored on this device. Your budget dates and amount will remain.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        model.resetCycleData()
+                        showResetDialog = false
+                    }
+                ) {
+                    Text("Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
