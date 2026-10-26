@@ -20,6 +20,15 @@ data class BudgetCycle(
 
 data class ActivityItem(val label: String, val amount: Long)
 data class ExtraBudget(val name: String, val amount: Long)
+private data class StateSnapshot(
+    val spent: Long,
+    val incomeAdded: Long,
+    val emergencyFund: Long,
+    val extraBudgets: List<ExtraBudget>,
+    val recentActivity: List<ActivityItem>,
+    val cycle: BudgetCycle,
+    val emergencyAllocationPercent: Int
+)
 
 class SpendWiseViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
@@ -70,48 +79,60 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addExpense(name: String, amount: Long) {
         if (amount <= 0) return
-        spent += amount
         val expenseName = name.trim().ifBlank { "Expense" }
+        val snapshot = makeSnapshot()
+        spent += amount
         recentActivity = (listOf(ActivityItem(expenseName, -amount)) + recentActivity).take(5)
         persist()
-        syncAction("Saving expense") {
-            SupabaseDataApi.addExpense(appContext, backendCycleId(), expenseName, amount)
-        }
+        syncAction(
+            label = "Saving expense",
+            action = { SupabaseDataApi.addExpense(appContext, backendCycleId(), expenseName, amount) },
+            rollback = { restoreSnapshot(snapshot) }
+        )
     }
 
     fun addIncome(amount: Long) {
         if (amount <= 0) return
         val emergencyAllocation = amount * emergencyAllocationPercent / 100
+        val snapshot = makeSnapshot()
         incomeAdded += amount - emergencyAllocation
         emergencyFund += emergencyAllocation
         recentActivity = (listOf(ActivityItem("Income", amount)) + recentActivity).take(5)
         persist()
-        syncAction("Saving income") {
-            SupabaseDataApi.addIncome(appContext, backendCycleId(), amount, emergencyAllocationPercent)
-        }
+        syncAction(
+            label = "Saving income",
+            action = { SupabaseDataApi.addIncome(appContext, backendCycleId(), amount, emergencyAllocationPercent) },
+            rollback = { restoreSnapshot(snapshot) }
+        )
     }
 
     fun addSavings(amount: Long) {
         if (amount <= 0 || amount > remainingBalance) return
+        val snapshot = makeSnapshot()
         emergencyFund += amount
         recentActivity = (listOf(ActivityItem("Manual savings", -amount)) + recentActivity).take(5)
         persist()
-        syncAction("Saving contribution") {
-            SupabaseDataApi.addSavings(appContext, amount)
-        }
+        syncAction(
+            label = "Saving contribution",
+            action = { SupabaseDataApi.addSavings(appContext, amount) },
+            rollback = { restoreSnapshot(snapshot) }
+        )
     }
 
     fun addExtraBudget(name: String, amount: Long) {
         if (amount <= 0) return
         val budgetName = name.trim().ifBlank { "Additional budget" }
+        val snapshot = makeSnapshot()
         extraBudgets = extraBudgets + ExtraBudget(budgetName, amount)
         recentActivity = (
             listOf(ActivityItem("Budget: $budgetName", amount)) + recentActivity
             ).take(5)
         persist()
-        syncAction("Saving extra budget") {
-            SupabaseDataApi.addExtraBudget(appContext, backendCycleId(), budgetName, amount)
-        }
+        syncAction(
+            label = "Saving extra budget",
+            action = { SupabaseDataApi.addExtraBudget(appContext, backendCycleId(), budgetName, amount) },
+            rollback = { restoreSnapshot(snapshot) }
+        )
     }
 
     fun updateEmergencyAllocationPercent(percent: Int) {
@@ -130,20 +151,28 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateBudget(startDate: LocalDate, endDate: LocalDate, budget: Long) {
         if (budget <= 0 || !endDate.isAfter(startDate)) return
+        val snapshot = makeSnapshot()
         cycle = cycle.copy(startDate = startDate, endDate = endDate, budget = budget)
         persist()
-        syncAction("Saving budget") {
-            val existing = SupabaseDataApi.activeCycle(appContext)
-            if (existing == null) SupabaseDataApi.createCycle(appContext, cycle)
-            else SupabaseDataApi.updateCycle(appContext, existing.id, cycle)
-        }
+        syncAction(
+            label = "Saving budget",
+            action = {
+                val existing = SupabaseDataApi.activeCycle(appContext)
+                if (existing == null) SupabaseDataApi.createCycle(appContext, cycle)
+                else SupabaseDataApi.updateCycle(appContext, existing.id, cycle)
+            },
+            rollback = { restoreSnapshot(snapshot) }
+        )
     }
 
     fun syncWithBackend() {
         viewModelScope.launch {
             isSyncing = true
             syncMessage = null
-            runCatching { SupabaseDataApi.snapshot(appContext) }
+            runCatching {
+                ensureBackendCycle()
+                SupabaseDataApi.snapshot(appContext)
+            }
                 .onSuccess { dashboard ->
                     cycle = cycle.copy(
                         startDate = LocalDate.parse(dashboard.cycle.startDate),
@@ -157,12 +186,18 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
                     persist()
                     syncMessage = "Synced with Supabase"
                 }
-                .onFailure { syncMessage = "Sync failed: ${it.message ?: "check your connection"}" }
+                .onFailure { error ->
+                    syncMessage = when (error.message) {
+                        NO_CONFIGURED_BUDGET -> "Set up a budget before syncing."
+                        else -> "Sync failed: ${error.message ?: "check your connection"}"
+                    }
+                }
             isSyncing = false
         }
     }
 
     private suspend fun backendCycleId(): String {
+        check(hasConfiguredBudget) { NO_CONFIGURED_BUDGET }
         return SupabaseDataApi.activeCycle(appContext)?.id
             ?: run {
                 SupabaseDataApi.createCycle(appContext, cycle)
@@ -171,12 +206,46 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
             }
     }
 
-    private fun syncAction(label: String, action: suspend () -> Unit) {
+    private suspend fun ensureBackendCycle() {
+        if (SupabaseDataApi.activeCycle(appContext) != null) return
+        check(hasConfiguredBudget) { NO_CONFIGURED_BUDGET }
+        SupabaseDataApi.createCycle(appContext, cycle)
+    }
+
+    private fun syncAction(
+        label: String,
+        action: suspend () -> Unit,
+        rollback: (() -> Unit)? = null
+    ) {
         viewModelScope.launch {
             runCatching { action() }
                 .onSuccess { syncMessage = "$label synced" }
-                .onFailure { syncMessage = "$label failed: ${it.message ?: "check your connection"}" }
+                .onFailure { error ->
+                    rollback?.invoke()
+                    syncMessage = "$label failed: ${error.message ?: "check your connection"}"
+                }
         }
+    }
+
+    private fun makeSnapshot(): StateSnapshot = StateSnapshot(
+        spent = spent,
+        incomeAdded = incomeAdded,
+        emergencyFund = emergencyFund,
+        extraBudgets = extraBudgets,
+        recentActivity = recentActivity,
+        cycle = cycle,
+        emergencyAllocationPercent = emergencyAllocationPercent
+    )
+
+    private fun restoreSnapshot(snapshot: StateSnapshot) {
+        spent = snapshot.spent
+        incomeAdded = snapshot.incomeAdded
+        emergencyFund = snapshot.emergencyFund
+        extraBudgets = snapshot.extraBudgets
+        recentActivity = snapshot.recentActivity
+        cycle = snapshot.cycle
+        emergencyAllocationPercent = snapshot.emergencyAllocationPercent
+        persist()
     }
 
     private fun persist() {
@@ -203,4 +272,8 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
                 if (parts.size == 2) parts[1].toLongOrNull()?.let { ExtraBudget(parts[0], it) } else null
             }
             ?: emptyList()
+
+    private companion object {
+        const val NO_CONFIGURED_BUDGET = "NO_CONFIGURED_BUDGET"
+    }
 }
