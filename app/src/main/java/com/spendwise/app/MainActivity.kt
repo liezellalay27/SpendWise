@@ -43,6 +43,7 @@ private fun SpendWiseApp(
         if (authModel.isAuthenticated) {
             SpendWiseShell(
                 model = model,
+                userId = authModel.userId,
                 displayName = authModel.displayName,
                 email = authModel.email,
                 onSignOut = authModel::signOut
