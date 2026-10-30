@@ -32,7 +32,10 @@ private data class StateSnapshot(
 
 class SpendWiseViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
-    private val preferences = application.getSharedPreferences("spendwise", Context.MODE_PRIVATE)
+    private val legacyPreferences = application.getSharedPreferences("spendwise", Context.MODE_PRIVATE)
+    private val metadataPreferences = application.getSharedPreferences("spendwise_metadata", Context.MODE_PRIVATE)
+    private var preferences = application.getSharedPreferences("spendwise_guest", Context.MODE_PRIVATE)
+    private var activeUserId: String? = null
 
     val hasConfiguredBudget: Boolean
         get() = preferences.contains("start_date") &&
@@ -68,6 +71,18 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     var syncMessage by mutableStateOf<String?>(null)
         private set
 
+    fun activateUser(userId: String) {
+        if (userId.isBlank() || activeUserId == userId) return
+        val scopedPreferences = appContext.getSharedPreferences(
+            "spendwise_${userId.replace(Regex("[^A-Za-z0-9_-]"), "_")}",
+            Context.MODE_PRIVATE
+        )
+        migrateLegacyDataIfNeeded(userId, scopedPreferences)
+        preferences = scopedPreferences
+        activeUserId = userId
+        reloadFromPreferences()
+    }
+
     val daysRemaining: Long
         get() = maxOf(1, ChronoUnit.DAYS.between(LocalDate.now(), cycle.endDate) + 1)
 
@@ -78,7 +93,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
         get() = maxOf(0, remainingBalance / daysRemaining)
 
     fun addExpense(name: String, amount: Long) {
-        if (amount <= 0) return
+        if (amount <= 0 || !requireActiveUser()) return
         val expenseName = name.trim().ifBlank { "Expense" }
         val snapshot = makeSnapshot()
         spent += amount
@@ -92,7 +107,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addIncome(amount: Long) {
-        if (amount <= 0) return
+        if (amount <= 0 || !requireActiveUser()) return
         val emergencyAllocation = amount * emergencyAllocationPercent / 100
         val snapshot = makeSnapshot()
         incomeAdded += amount - emergencyAllocation
@@ -107,7 +122,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addSavings(amount: Long) {
-        if (amount <= 0 || amount > remainingBalance) return
+        if (amount <= 0 || amount > remainingBalance || !requireActiveUser()) return
         val snapshot = makeSnapshot()
         emergencyFund += amount
         recentActivity = (listOf(ActivityItem("Manual savings", -amount)) + recentActivity).take(5)
@@ -120,7 +135,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addExtraBudget(name: String, amount: Long) {
-        if (amount <= 0) return
+        if (amount <= 0 || !requireActiveUser()) return
         val budgetName = name.trim().ifBlank { "Additional budget" }
         val snapshot = makeSnapshot()
         extraBudgets = extraBudgets + ExtraBudget(budgetName, amount)
@@ -136,11 +151,13 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updateEmergencyAllocationPercent(percent: Int) {
+        if (!requireActiveUser()) return
         emergencyAllocationPercent = percent.coerceIn(0, 100)
         persist()
     }
 
     fun resetCycleData() {
+        if (!requireActiveUser()) return
         spent = 0
         incomeAdded = 0
         emergencyFund = 0
@@ -150,7 +167,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updateBudget(startDate: LocalDate, endDate: LocalDate, budget: Long) {
-        if (budget <= 0 || !endDate.isAfter(startDate)) return
+        if (budget <= 0 || !endDate.isAfter(startDate) || !requireActiveUser()) return
         val snapshot = makeSnapshot()
         cycle = cycle.copy(startDate = startDate, endDate = endDate, budget = budget)
         persist()
@@ -166,6 +183,7 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun syncWithBackend() {
+        if (!requireActiveUser()) return
         viewModelScope.launch {
             isSyncing = true
             syncMessage = null
@@ -262,6 +280,49 @@ class SpendWiseViewModel(application: Application) : AndroidViewModel(applicatio
                 extraBudgets.joinToString("|") { "${it.name.replace("|", "")}::${it.amount}" }
             )
             .apply()
+    }
+
+    private fun requireActiveUser(): Boolean {
+        if (activeUserId != null) return true
+        syncMessage = "Sign in before managing financial data."
+        return false
+    }
+
+    private fun reloadFromPreferences() {
+        cycle = BudgetCycle(
+            budget = preferences.getLong("budget", 30_000_00),
+            startDate = preferences.getString("start_date", null)
+                ?.let(LocalDate::parse) ?: LocalDate.now(),
+            endDate = preferences.getString("end_date", null)
+                ?.let(LocalDate::parse) ?: LocalDate.now().plusDays(30)
+        )
+        spent = preferences.getLong("spent", 0)
+        incomeAdded = preferences.getLong("income", 0)
+        emergencyFund = preferences.getLong("emergency", 0)
+        emergencyAllocationPercent = preferences.getInt("emergency_percent", 10)
+        extraBudgets = loadExtraBudgets()
+        recentActivity = emptyList()
+        syncMessage = null
+    }
+
+    private fun migrateLegacyDataIfNeeded(userId: String, target: android.content.SharedPreferences) {
+        val owner = metadataPreferences.getString("legacy_owner_id", null)
+        if (owner == null && !target.contains("budget")) {
+            val editor = target.edit()
+            legacyPreferences.all.forEach { (key, value) ->
+                when (value) {
+                    is Long -> editor.putLong(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Float -> editor.putFloat(key, value)
+                }
+            }
+            editor.apply()
+        }
+        if (owner == null) {
+            metadataPreferences.edit().putString("legacy_owner_id", userId).apply()
+        }
     }
 
     private fun loadExtraBudgets(): List<ExtraBudget> =

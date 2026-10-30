@@ -28,6 +28,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var email by mutableStateOf(preferences.getString("email", null).orEmpty())
         private set
+    var userId by mutableStateOf(preferences.getString("user_id", null).orEmpty())
+        private set
 
     fun signIn(email: String, password: String) {
         authenticate(email = email, password = password, isSignUp = false)
@@ -49,6 +51,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         isAuthenticated = false
         displayName = ""
         email = ""
+        userId = ""
     }
 
     fun clearError() {
@@ -74,6 +77,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             .putString("refresh_token", values["refresh_token"])
             .putString("user_id", accessToken.jwtSubject())
             .apply()
+        userId = accessToken.jwtSubject().orEmpty()
         isAuthenticated = true
         requiresEmailConfirmation = false
         errorMessage = null
@@ -111,6 +115,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     displayName = response.user?.user_metadata?.get("display_name")
                         ?.takeIf { it.isNotBlank() } ?: name
                     this@AuthViewModel.email = response.user?.email ?: email.trim()
+                    userId = response.user?.id ?: response.access_token?.jwtSubject().orEmpty()
                     isAuthenticated = true
                 } else if (isSignUp) {
                     requiresEmailConfirmation = true
