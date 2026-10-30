@@ -103,8 +103,10 @@ actions are persisted to the matching Supabase tables:
 - Extra budgets -> `extra_budgets`
 - Automatic and manual savings -> `emergency_fund_transactions`
 
-The app keeps `SharedPreferences` as an offline cache and synchronizes it when the
-authenticated shell opens or when **Sync with backend** is pressed. The old
+The app keeps a user-scoped `SharedPreferences` cache and synchronizes it when the
+authenticated shell opens or when **Sync with backend** is pressed. Existing data
+from the previous single-user cache is migrated once to the first signed-in user.
+The old
 `backend/` Spring Boot project is still an in-memory API prototype and is not the
 source of truth for Supabase data.
 

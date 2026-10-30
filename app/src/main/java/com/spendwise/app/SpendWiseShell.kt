@@ -18,11 +18,13 @@ private data class AppTab(val label: String, val marker: String)
 @Composable
 fun SpendWiseShell(
     model: SpendWiseViewModel,
+    userId: String,
     displayName: String,
     email: String,
     onSignOut: () -> Unit
 ) {
-    LaunchedEffect(Unit) {
+    LaunchedEffect(userId) {
+        model.activateUser(userId)
         model.syncWithBackend()
     }
     val tabs = listOf(
